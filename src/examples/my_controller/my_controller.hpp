@@ -17,7 +17,7 @@
 #include <uORB/topics/actuator_motors.h>
 #include <uORB/topics/actuator_armed.h>
 #include <uORB/topics/my_controller_status.h>
-
+#include <uORB/topics/vehicle_command.h>
 #include <matrix/matrix/math.hpp>
 
 class MyController :
@@ -95,8 +95,13 @@ private:
 	uORB::Subscription _rpm_sub{ORB_ID(rpm)};
 	uORB::Subscription _armed_sub{ORB_ID(actuator_armed)};
 
+
 	uORB::Publication<actuator_motors_s> _actuator_motors_pub{ORB_ID(actuator_motors)};
         uORB::Publication<my_controller_status_s> _my_controller_status_pub{ORB_ID(my_controller_status)};
+	uORB::Publication<vehicle_command_s> _vehicle_command_pub{ORB_ID(vehicle_command)};
+
+	bool _attitude_disarm_sent{false};
+
 	// ---------- cache ----------
 	vehicle_attitude_s _att{};
 	vehicle_angular_velocity_s _ang_vel{};
@@ -120,26 +125,30 @@ private:
 	matrix::Vector3f _zd_ddot_prev_E{0.f, 0.f, 0.f};
 
 	// ---------- parameters ----------
-	float _m{1.42668381f};
+	// float _m{1.42668381f};
+	float _m{1.62468381f};
 	float _g{9.81f};
 	float _l{0.17f};
 
-	float _Jx{0.0212844f};
-	float _Jy{0.01906274f};
-	float _Jz{0.01775539f};
+	// float _Jx{0.00212844f};
+	// float _Jy{0.01906274f};
+	// float _Jz{0.01775539f};
+	float _Jx{0.00459844f};
+	float _Jy{0.02153274f};
+	float _Jz{0.01974568f};
 	float _Jr{1.1e-4f};
 
-	float _b{8.4e-4f};
-	float _kq{2.6e-7f};
-	float _d1{3.0e-3f};
-	float _d2{4.0e-4f};
+	float _b{2.1e-5f};
+	float _kq{3.85e-7f};
+	float _d1{5.0e-3f};
+	float _d2{8.0e-4f};
 
-	float _k_c1{2.0f};
-	float _k_c2{2.0f};
-	float _k_p{2.5f};
-	float _k_q{2.5f};
+	float _k_c1{3.0f};
+	float _k_c2{3.0f};
+	float _k_p{3.5f};
+	float _k_q{3.5f};
 
-	float _lambda_alpha{6.0f};
+	float _lambda_alpha{3.0f};
 
 	float _k_up{0.0f};
 	float _k_ui{0.0f};
@@ -152,12 +161,12 @@ private:
 	float _det_eps{1e-6f};
 	float _b3z_eps{1e-3f};
 
-	float _omega_max{1100.f};
+	float _omega_max{1055.57508f};
 
 	// ---------- manual mapping ----------
-	float _max_tilt_angle{0.35f};     // rad, 左摇杆最大倾斜角
-	float _u1_min_factor{0.0f};       // 右摇杆最低：0.5 mg
-	float _u1_max_factor{1.5f};       // 右摇杆最高：1.5 mg
+	float _max_tilt_angle{0.35f};     // rad, 左摇杆最大倾斜角，20度
+	float _u1_min_factor{0.0f};       // 右摇杆最低：0.0 mg
+	float _u1_max_factor{3.0f};       // 右摇杆最高：2*_omega_max^2 * b / mg
 
 	float _zd_dot_lpf_hz{8.0f};
 	float _zd_ddot_lpf_hz{8.0f};

@@ -166,8 +166,9 @@ void MyController::controllerStep(float tk, float dt,
 	const float e_u = u1 - u1_ref;
 	const float u1_cmd_unsat = u1_ref - _k_up * e_u - _k_ui * xc.eta_u;
 
-	const float gain_spin = 1.f - expf(-math::max(tk - _t_spinup, 0.f) / 0.8f);
-	const float delta_raw = gain_spin * (xc.alpha_cf * cosf(psi) + xc.alpha_sf * sinf(psi));
+	// const float gain_spin = 1.f - expf(-math::max(tk - _t_spinup, 0.f) / 0.8f);
+	// const float delta_raw = gain_spin * (xc.alpha_cf * cosf(psi) + xc.alpha_sf * sinf(psi));
+	const float delta_raw = (xc.alpha_cf * cosf(psi) + xc.alpha_sf * sinf(psi));
 
 	const float u1_cmd_min = fabsf(delta_raw) + _u1_min_margin;
 
@@ -180,14 +181,19 @@ void MyController::controllerStep(float tk, float dt,
 	const float delta_max = math::max(u1_cmd - 1e-6f, 0.f);
 	const float delta = math::constrain(delta_raw, -delta_max, delta_max);
 
-	const float T1_cmd = math::max((u1_cmd + delta) * 0.5f, 0.f);
-	const float T2_cmd = math::max((u1_cmd - delta) * 0.5f, 0.f);
+    const float T1_cmd = math::max((u1_cmd - delta) * 0.5f, 0.f);
+    const float T2_cmd = math::max((u1_cmd + delta) * 0.5f, 0.f);
+
+    // const float T1_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
+    // const float T2_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
 
 	const float weff1_cmd = sqrtf(math::max(T1_cmd / _b, 0.f));
 	const float weff2_cmd = sqrtf(math::max(T2_cmd / _b, 0.f));
 
-	out.omega1_cmd = math::constrain(r + weff1_cmd, 0.f, _omega_max);
-	out.omega2_cmd = math::constrain(r + weff2_cmd, 0.f, _omega_max);
+    out.omega1_cmd = math::constrain(r + weff1_cmd, 0.f, _omega_max);
+    out.omega2_cmd = math::constrain(r + weff2_cmd, 0.f, _omega_max);
+    // out.omega1_cmd = math::constrain(weff1_cmd, 0.f, _omega_max);
+    // out.omega2_cmd = math::constrain(weff2_cmd, 0.f, _omega_max);
 
 	out.T1_cmd = T1_cmd;
 	out.T2_cmd = T2_cmd;
@@ -248,6 +254,9 @@ void MyController::Run()
 			if (!PX4_ISFINITE(_motor1_rpm_meas)) {
 				_motor1_rpm_meas = _rpm.rpm_estimate;
 			}
+			if (!PX4_ISFINITE(_motor2_rpm_meas)) {
+				_motor2_rpm_meas = _rpm.rpm_estimate;
+			}
 		}
 	}
 
@@ -272,6 +281,8 @@ void MyController::Run()
 		_last_omega1_cmd = 0.f;
 		_last_omega2_cmd = 0.f;
 
+		_attitude_disarm_sent = false;
+
 		actuator_motors_s motors{};
 		motors.timestamp = now_us;
 		motors.timestamp_sample = now_us;
@@ -287,6 +298,65 @@ void MyController::Run()
 
 	matrix::Quatf q_att(_att.q);
 	const matrix::Eulerf euler(q_att);
+
+	// 滚转角 / 俯仰角超过 30 度时，立即 disarm 并停止两个电机
+	const float attitude_disarm_limit_rad = 20.0f * M_PI_F / 180.0f;
+
+	const float roll_abs = fabsf(euler.phi());
+	const float pitch_abs = fabsf(euler.theta());
+
+	if ((roll_abs > attitude_disarm_limit_rad) || (pitch_abs > attitude_disarm_limit_rad)) {
+
+		if (!_attitude_disarm_sent) {
+			vehicle_command_s vcmd{};
+			vcmd.timestamp = now_us;
+
+			// MAV_CMD_COMPONENT_ARM_DISARM
+			// param1 = 0 表示 disarm
+			vcmd.command = vehicle_command_s::VEHICLE_CMD_COMPONENT_ARM_DISARM;
+			vcmd.param1 = 0.0f;
+			vcmd.param2 = 0.0f;
+
+			vcmd.target_system = 1;
+			vcmd.target_component = 1;
+			vcmd.source_system = 1;
+			vcmd.source_component = 1;
+			vcmd.from_external = false;
+
+			_vehicle_command_pub.publish(vcmd);
+
+		//	_attitude_disarm_sent = true;
+
+			PX4_WARN("attitude limit exceeded: roll=%.1f deg pitch=%.1f deg, disarm",
+				(double)(euler.phi() * 180.0f / M_PI_F),
+				(double)(euler.theta() * 180.0f / M_PI_F));
+		}
+
+		// 立即清零控制器内部状态
+		_xc.alpha_cf = 0.f;
+		_xc.alpha_sf = 0.f;
+		_xc.eta_u = 0.f;
+
+		_last_omega1_cmd = 0.f;
+		_last_omega2_cmd = 0.f;
+
+		// 立即停止本模块发给两个电机的输出
+		actuator_motors_s motors{};
+		motors.timestamp = now_us;
+		motors.timestamp_sample = now_us;
+		motors.reversible_flags = 0;
+
+		for (int i = 0; i < actuator_motors_s::NUM_CONTROLS; i++) {
+			motors.control[i] = NAN;
+		}
+
+		motors.control[0] = 0.f;
+		motors.control[1] = 0.f;
+
+		_actuator_motors_pub.publish(motors);
+
+		return;
+	}
 
 	const float p = _ang_vel.xyz[0];
 	const float q = _ang_vel.xyz[1];
@@ -384,15 +454,20 @@ void MyController::Run()
 	_last_omega1_cmd = omega1_cmd;
 	_last_omega2_cmd = omega2_cmd;
 
-	// actuator_motors 语义是归一化推力，不是归一化转速
-	const float single_motor_thrust_max = 0.5f * _u1_max_factor * _m * _g;
+	// actuator_motors 语义是归一化推力，不是归一化转速，电调已经做了相应映射关系可以发归一化转速命令
+	// const float single_motor_thrust_max = 0.5f * _u1_max_factor * _m * _g;
+
+	// const float motor1_norm =
+	// 	math::constrain(ctrl_out.T1_cmd / single_motor_thrust_max, 0.f, 1.f);
+
+	// const float motor2_norm =
+	// 	math::constrain(ctrl_out.T2_cmd / single_motor_thrust_max, 0.f, 1.f);
 
 	const float motor1_norm =
-		math::constrain(ctrl_out.T1_cmd / single_motor_thrust_max, 0.f, 1.f);
+		math::constrain(ctrl_out.omega1_cmd / _omega_max, 0.f, 1.f);
 
 	const float motor2_norm =
-		math::constrain(ctrl_out.T2_cmd / single_motor_thrust_max, 0.f, 1.f);
-
+		math::constrain(ctrl_out.omega2_cmd / _omega_max, 0.f, 1.f);
 	actuator_motors_s motors{};
 	motors.timestamp = now_us;
 	motors.timestamp_sample = now_us;
@@ -453,7 +528,7 @@ void MyController::Run()
 	st.omega1_cmd = omega1_cmd;
 	st.omega2_cmd = omega2_cmd;
 
-	_my_controller_status_pub.publish(st);
+   _my_controller_status_pub.publish(st);
 }
 
 int MyController::task_spawn(int argc, char *argv[])
