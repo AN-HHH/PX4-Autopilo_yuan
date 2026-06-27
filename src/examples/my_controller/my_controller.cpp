@@ -181,11 +181,11 @@ void MyController::controllerStep(float tk, float dt,
 	const float delta_max = math::max(u1_cmd - 1e-6f, 0.f);
 	const float delta = math::constrain(delta_raw, -delta_max, delta_max);
 
-    const float T1_cmd = math::max((u1_cmd - delta) * 0.5f, 0.f);
-    const float T2_cmd = math::max((u1_cmd + delta) * 0.5f, 0.f);
+//     const float T1_cmd = math::max((u1_cmd + delta) * 0.5f, 0.f);
+//     const float T2_cmd = math::max((u1_cmd - delta) * 0.5f, 0.f);
 
-    // const float T1_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
-    // const float T2_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
+    const float T1_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
+    const float T2_cmd = math::max((u1_cmd ) * 0.5f, 0.f);
 
 	const float weff1_cmd = sqrtf(math::max(T1_cmd / _b, 0.f));
 	const float weff2_cmd = sqrtf(math::max(T2_cmd / _b, 0.f));

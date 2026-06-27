@@ -28,4 +28,8 @@ param set-default CA_ROTOR1_PY  0.0
 param set-default CA_ROTOR1_PZ  0.0
 param set-default CA_ROTOR1_KM  0.05
 
+# Route the allocator motor outputs to the first two MAIN PWM channels.
+param set-default PWM_MAIN_FUNC1 101
+param set-default PWM_MAIN_FUNC2 102
+
 my_controller start
